@@ -516,7 +516,6 @@ La respuesta tiene esta estructura:
 }
 """
 
-
 def get_map_json(request, **kwargs):
     data_result = {}
 
@@ -585,6 +584,78 @@ def get_map_json(request, **kwargs):
 
     return JsonResponse(data_result)
 
+def get_latest_station_data(request, **kwargs):
+    data_result = {}
+
+    # Obtener el parámetro de medición de la URL, si existe
+    measureParam = kwargs.get("measure", None)
+    selectedMeasure = None
+    measurements = Measurement.objects.all()
+
+    # Seleccionar la medición si se especifica
+    if measureParam is not None:
+        selectedMeasure = Measurement.objects.filter(name=measureParam).first()
+    elif measurements.exists():
+        selectedMeasure = measurements.first()
+
+    locations = Location.objects.all()
+
+    # Obtener el rango de fechas desde los parámetros del request o usar valores por defecto (última semana)
+    try:
+        start = datetime.fromtimestamp(float(request.GET.get("from", None)) / 1000)
+    except:
+        start = None
+    try:
+        end = datetime.fromtimestamp(float(request.GET.get("to", None)) / 1000)
+    except:
+        end = None
+
+    if start is None and end is None:
+        start = datetime.now() - dateutil.relativedelta.relativedelta(weeks=1)
+        end = datetime.now()
+    elif end is None:
+        end = datetime.now()
+    elif start is None:
+        start = datetime.fromtimestamp(0)
+
+    data = []
+
+    for location in locations:
+        # Filtrar las estaciones activas por ubicación
+        stations = Station.objects.filter(location=location, active=True)
+
+        # Para cada estación, obtener la última medición registrada dentro del rango de fechas
+        for station in stations:
+            locationData = Data.objects.filter(
+                station=station,
+                measurement=selectedMeasure,
+                time__gte=start.date(),
+                time__lte=end.date()
+            ).order_by('-time').first()
+
+            # Solo procesar si existe un valor de medición
+            if locationData:
+                data.append({
+                    'station_name': station.last_activity,
+                    'location': f'{location.city.name}, {location.state.name}, {location.country.name}',
+                    'lat': location.lat,
+                    'lng': location.lng,
+                    'last_measurement_value': locationData.value,
+                    'last_measurement_time': locationData.time,
+                })
+
+    # Formatear las fechas para la respuesta
+    startFormatted = start.strftime("%d/%m/%Y") if start else " "
+    endFormatted = end.strftime("%d/%m/%Y") if end else " "
+
+    # Llenar el resultado con los datos
+    data_result["locations"] = [loc.str() for loc in locations]
+    data_result["start"] = startFormatted
+    data_result["end"] = endFormatted
+    data_result["data"] = data
+
+    # Retornar el resultado como JSON
+    return JsonResponse(data_result)
 
 def download_csv_data(request):
     print("Getting time for csv req")

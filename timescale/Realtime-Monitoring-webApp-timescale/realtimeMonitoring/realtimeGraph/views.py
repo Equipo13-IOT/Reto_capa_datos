@@ -491,7 +491,6 @@ La respuesta tiene esta estructura:
 }
 """
 
-
 def get_map_json(request, **kwargs):
     data_result = {}
 
@@ -555,6 +554,54 @@ def get_map_json(request, **kwargs):
 
     startFormatted = start.strftime("%d/%m/%Y") if start != None else " "
     endFormatted = end.strftime("%d/%m/%Y") if end != None else " "
+
+    data_result["locations"] = [loc.str() for loc in locations]
+    data_result["start"] = startFormatted
+    data_result["end"] = endFormatted
+    data_result["data"] = data
+
+    return JsonResponse(data_result)
+
+def get_latest_station_data(request, **kwargs):
+    data_result = {}
+
+    locations = Location.objects.all()
+    start = datetime.fromtimestamp(float(request.GET.get("from", None)) / 1000) if "from" in request.GET else None
+    end = datetime.fromtimestamp(float(request.GET.get("to", None)) / 1000) if "to" in request.GET else None
+
+    # Si no se proporcionan fechas, usar la semana pasada como predeterminado
+    if start is None and end is None:
+        start = datetime.now() - dateutil.relativedelta.relativedelta(weeks=1)
+        end = datetime.now()
+    elif start is None:
+        start = datetime.fromtimestamp(0)
+    if end is None:
+        end = datetime.now()
+
+    start_ts = int(start.timestamp() * 1000000)
+    end_ts = int(end.timestamp() * 1000000)
+
+    data = []
+
+    for location in locations:
+        stations = Station.objects.filter(location=location, active=True)  # Filtrar por estaciones activas
+        for station in stations:
+            latest_data = Data.objects.filter(station=station, time__gte=start_ts, time__lte=end_ts).order_by('-time').first()
+
+            if latest_data:
+                data.append(
+                    {
+                        "station_name": f"{station.last_activity}",  # Última actividad registrada
+                        "location": f"{location.city.name}, {location.state.name}, {location.country.name}",
+                        "lat": location.lat,
+                        "lng": location.lng,
+                        "last_measurement_value": latest_data.value,
+                        "last_measurement_time": latest_data.time,
+                    }
+                )
+
+    startFormatted = start.strftime("%d/%m/%Y")
+    endFormatted = end.strftime("%d/%m/%Y")
 
     data_result["locations"] = [loc.str() for loc in locations]
     data_result["start"] = startFormatted
